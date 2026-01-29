@@ -100,13 +100,18 @@ document.getElementById('contact-form').addEventListener('submit', function(e) {
     this.reset();
 });
 
-// Chatbot functionality - Client-side implementation for GitHub Pages
+// Chatbot functionality - Connects to Flask backend
 const chatbotToggle = document.getElementById('chatbot-toggle');
 const chatbotWindow = document.getElementById('chatbot-window');
 const chatbotClose = document.getElementById('chatbot-close');
 const chatbotSend = document.getElementById('chatbot-send');
 const chatbotInput = document.getElementById('chatbot-input');
 const chatbotMessages = document.getElementById('chatbot-messages');
+
+// Backend API URL - Update this with your deployed backend URL
+// For local development: 'http://localhost:5000'
+// For production: 'https://your-backend-url.onrender.com' (or your hosting service)
+const BACKEND_URL = 'https://your-backend-url.onrender.com'; // UPDATE THIS!
 
 // Knowledge base (client-side)
 const knowledgeBase = {
@@ -382,28 +387,53 @@ function addMessage(text, isUser) {
     messageDiv.innerHTML = text.split('\n').join('<br>');
     chatbotMessages.appendChild(messageDiv);
     chatbotMessages.scrollTop = chatbotMessages.scrollHeight;
+    return messageDiv; // Return element so it can be removed if needed
 }
 
-function sendMessage() {
+async function sendMessage() {
     const message = chatbotInput.value.trim();
     if (!message) return;
     
     addMessage(message, true);
     chatbotInput.value = '';
+    chatbotSend.disabled = true;
+    chatbotInput.disabled = true;
     
-    // Add to conversation history
-    conversationHistory.push(message);
+    // Show loading indicator
+    const loadingMessage = addMessage("Thinking...", false);
     
-    // Keep history manageable
-    if (conversationHistory.length > 10) {
-        conversationHistory = conversationHistory.slice(-10);
+    try {
+        // Call Flask backend API
+        const response = await fetch(`${BACKEND_URL}/chat`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                message: message,
+                session_id: 'github-pages-session'
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        // Remove loading message and add actual response
+        loadingMessage.remove();
+        addMessage(data.response || "I'm sorry, I couldn't generate a response.", false);
+        
+    } catch (error) {
+        console.error('Error calling backend:', error);
+        loadingMessage.remove();
+        addMessage("Sorry, I'm having trouble connecting to the server. Please try again later.", false);
+    } finally {
+        chatbotSend.disabled = false;
+        chatbotInput.disabled = false;
+        chatbotInput.focus();
     }
-    
-    // Generate response (client-side)
-    setTimeout(() => {
-        const response = generateResponse(message);
-        addMessage(response, false);
-    }, 300); // Small delay to simulate thinking
 }
 
 chatbotSend.addEventListener('click', sendMessage);

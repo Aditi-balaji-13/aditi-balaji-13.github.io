@@ -1,9 +1,21 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+import os
 import re
 
+# LangChain imports
+from langchain_together import ChatTogether
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.vectorstores import Chroma
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.chains import RetrievalQA
+from langchain.prompts import PromptTemplate
+from langchain_core.documents import Document
+
 app = Flask(__name__)
-CORS(app)
+# Allow CORS from all origins (GitHub Pages can be on any *.github.io subdomain)
+# In production, you may want to restrict this to specific domains
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 # Database of information about Aditi
 knowledge_base = {
@@ -143,6 +155,132 @@ knowledge_base = {
     }
 }
 
+# System prompt
+system_prompt = """You are an assistant for question-answering tasks. 
+    Use the following pieces of retrieved context to answer the question. 
+    If you don't know the answer, just say that you don't know. 
+    The context is extracted from Aditi Balaji's resume, experiences, and creative work. 
+    Answer questions in the following pattern:
+
+    user: Whos is Aditi Balaji?
+
+    Assistant: Aditi Balaji is a recent graduate with a master's degree in Data Science from Rice University. 
+    She completed Bachelor's of Technology with a minor in Artificial Intelligence and Machine Learning from IIT Madras. 
+    She has experiances and projects in the fields of LLMs, Computer Vidion, Quantitstive finance and more. 
+
+    User: Where did Aditi study?
+
+    Assistant: Aditi studied at IIT Madras for her Bachelor's degree and at Rice University for her Master's degree in Data Science.
+
+    User: What tools does Aditi use in machine learning?
+
+    Assistant: Aditi's machine learning toolkit includes a strong foundation in programming languages such as Python, SQL, R, Java, C, and MATLAB. Her core ML frameworks include PyTorch, TensorFlow, Scikit-learn. She also uses CatBoost and XGBoost for gradient boosting tasks, and HuggingFace Transformers for working with large language models. 
+    For graph-based and retrieval-augmented learning, she employs Langchain, FAISS, ChromaDB, and she leverages Apache PySpark and Hadoop to scale machine learning workflows on large datasets. This combination of languages and tools reflects her ability to work across diverse ML domains including NLP, computer vision, and graph learning.
+    She also has experiance with AWS, dockers, etc. for deployment. 
+
+    User: What are Aditi's top experiances?
+
+    Assistant: Aditi has worked on several impactful data science projects spanning computer vision, natural language processing, financial modeling, and graph learning. At NASA, she developed a lightweight spacecraft image segmentation system using deep learning models optimized for low-resource environments, while at Linbeck Group, she built a retrieval-augmented generation (RAG) chatbot to process large volumes of unstructured data. Her work at Goldman Sachs focused on financial modeling, where she improved marketing recommendation systems using advanced techniques for imbalanced data, and her research at IIT Madras involved applying spatio-temporal Graph Neural Networks to enhance the performance of grain growth simulations, demonstrating her strength in both applied machine learning and domain-specific graph-based modeling.
+
+    Use the following context and answer precisely the question asked by the user.
+    Context: {context}:"""
+
+# Convert knowledge_base to documents
+def knowledge_base_to_documents(kb):
+    """Convert knowledge_base dictionary to list of Document objects"""
+    documents = []
+    
+    # Education documents
+    for key, edu in kb["education"].items():
+        text = f"Education: {edu['school']} ({edu['location']}). {edu['degree']} from {edu['duration']}. "
+        if 'minor' in edu:
+            text += f"{edu['minor']}. "
+        text += f"Courses: {edu['courses']}"
+        documents.append(Document(page_content=text, metadata={"type": "education", "key": key}))
+    
+    # Experience documents
+    for key, exp in kb["experience"].items():
+        text = f"Experience: {exp['title']} at {exp['company']} ({exp['location']}) from {exp['duration']}. {exp['description']}"
+        documents.append(Document(page_content=text, metadata={"type": "experience", "key": key}))
+    
+    # Project documents
+    for key, proj in kb["projects"].items():
+        text = f"Project: {proj['name']} ({proj['tech']}) from {proj['duration']}. {proj['description']}"
+        documents.append(Document(page_content=text, metadata={"type": "project", "key": key}))
+    
+    # General information
+    gen = kb["general"]
+    text = f"General Information: {gen['title']}. Contact: Email: {gen['email']}, LinkedIn: {gen['linkedin']}, GitHub: {gen['github']}"
+    documents.append(Document(page_content=text, metadata={"type": "general"}))
+    
+    return documents
+
+# Initialize RAG pipeline
+def initialize_rag_pipeline():
+    """Initialize the RAG pipeline with vector store and LLM"""
+    # Get API key from environment variable (or use st.secrets if available)
+    # For Flask, we'll use environment variable
+    together_api_key = os.environ.get("TOGETHER_API", "")
+    
+    # Initialize embeddings
+    embeddings = HuggingFaceEmbeddings(
+        model_name="sentence-transformers/all-MiniLM-L6-v2"
+    )
+    
+    # Convert knowledge_base to documents
+    documents = knowledge_base_to_documents(knowledge_base)
+    
+    # Split documents into chunks
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=200
+    )
+    splits = text_splitter.split_documents(documents)
+    
+    # Create vector store
+    vectorstore = Chroma.from_documents(
+        documents=splits,
+        embedding=embeddings,
+        persist_directory="./chroma_db"
+    )
+    
+    # Initialize LLM
+    llm = ChatTogether(
+        model="meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
+        temperature=0.1,
+        max_tokens=1000,
+        top_p=0.9,
+        api_key=together_api_key
+    )
+    
+    # Create prompt template
+    prompt_template = PromptTemplate(
+        template=system_prompt + "\n\nQuestion: {question}\n\nAssistant:",
+        input_variables=["context", "question"]
+    )
+    
+    # Create retrieval chain
+    qa_chain = RetrievalQA.from_chain_type(
+        llm=llm,
+        chain_type="stuff",
+        retriever=vectorstore.as_retriever(search_kwargs={"k": 3}),
+        chain_type_kwargs={"prompt": prompt_template},
+        return_source_documents=True
+    )
+    
+    return qa_chain, vectorstore
+
+# Initialize RAG pipeline (lazy initialization)
+qa_chain = None
+vectorstore = None
+
+def get_rag_chain():
+    """Get or initialize the RAG chain"""
+    global qa_chain, vectorstore
+    if qa_chain is None:
+        qa_chain, vectorstore = initialize_rag_pipeline()
+    return qa_chain
+
 # Rage responses (for when user is being annoying or asking inappropriate questions)
 rage_responses = [
     "Ugh, really? That's what you're asking? 🙄",
@@ -166,90 +304,30 @@ def check_rage_triggers(message):
         return True
     return False
 
-def search_knowledge_base(query):
-    query_lower = query.lower()
-    results = []
-    
-    # Check education
-    if any(term in query_lower for term in ["education", "school", "university", "degree", "master", "bachelor", "rice", "iit", "iitm"]):
-        if "rice" in query_lower or "master" in query_lower:
-            results.append(f"Aditi is doing her Master of Data Science at Rice University (Houston, TX) from Aug 2023 - May 2025. Courses include: {knowledge_base['education']['rice']['courses']}")
-        if "iit" in query_lower or "bachelor" in query_lower or "undergraduate" in query_lower:
-            results.append(f"Aditi completed her Bachelor of Technology in Metallurgical and Materials Engineering at IIT Madras (Chennai, IN) from Jul 2019 - Jul 2023. She also has a Minor in Machine Learning and Artificial Intelligence. Relevant courses: {knowledge_base['education']['iit']['courses']}")
-    
-    # Check experience
-    experience_keywords = {
-        "nasa": ["nasa", "spacecraft", "image segmentation", "capstone"],
-        "linbeck": ["linbeck", "rag", "chatbot", "aws", "chromadb", "ollama"],
-        "icme": ["icme", "grain", "graph neural", "gnn"],
-        "goldman": ["goldman", "sachs", "quantitative", "analyst", "marketing"],
-        "anen": ["anen", "crystallographic", "dft", "band-gap"]
-    }
-    
-    for exp_key, keywords in experience_keywords.items():
-        if any(keyword in query_lower for keyword in keywords):
-            exp = knowledge_base['experience'][exp_key]
-            results.append(f"{exp['title']} at {exp['company']} ({exp['location']}) from {exp['duration']}. {exp['description']}")
-    
-    # Check projects
-    project_keywords = {
-        "generative_ai": ["generative", "nerf", "3d", "depth estimation", "diffusion"],
-        "big_data": ["big data", "hadoop", "pyspark", "mapreduce", "aws"],
-        "qa_assistant": ["qa", "assistant", "distilgpt", "dolly"],
-        "financial": ["financial", "stock", "market", "backtesting", "investment"],
-        "graph_ml": ["graph", "knowledge graph", "llm", "semantic"],
-        "stock": ["stock", "catboost", "closing price", "mse"],
-        "encrypted_ir": ["encrypted", "information retrieval", "vector"],
-        "image_classification": ["image", "classification", "cifar", "cnn"],
-        "logic_tool": ["logic", "fol", "clause", "xml"],
-        "rl": ["reinforcement", "q-learning", "policy gradient", "bellman"],
-        "game_theory": ["game theory", "farmer", "policy", "simulation"],
-        "customer_behavior": ["customer", "behavior", "recommendation", "rating"]
-    }
-    
-    for proj_key, keywords in project_keywords.items():
-        if any(keyword in query_lower for keyword in keywords):
-            proj = knowledge_base['projects'][proj_key]
-            results.append(f"{proj['name']} ({proj['tech']}) from {proj['duration']}. {proj['description']}")
-    
-    # General questions
-    if any(term in query_lower for term in ["who", "what do", "tell me about", "about aditi"]):
-        results.append(f"Aditi is a {knowledge_base['general']['title']}. She's currently pursuing her Master's at Rice University and has extensive experience in data science, AI, and machine learning. Check out her projects and experience sections!")
-    
-    if any(term in query_lower for term in ["contact", "email", "linkedin", "github", "reach"]):
-        results.append(f"You can reach Aditi on LinkedIn: {knowledge_base['general']['linkedin']} or GitHub: {knowledge_base['general']['github']}")
-    
-    return results
-
 def generate_response(message, conversation_history=[]):
+    """Generate response using RAG pipeline"""
     # Check for rage triggers
     if check_rage_triggers(message) and len(conversation_history) > 2:
         import random
         rage_response = random.choice(rage_responses)
         # Still provide the answer but with attitude
-        results = search_knowledge_base(message)
-        if results:
-            return f"{rage_response} But fine, here it is: {results[0]}"
-        else:
-            return f"{rage_response} And I don't know what you're even asking about! Try asking about education, experience, or projects!"
+        try:
+            qa_chain = get_rag_chain()
+            result = qa_chain.invoke({"query": message})
+            response_text = result.get("result", "I don't know the answer to that.")
+            return f"{rage_response} But fine, here it is: {response_text}"
+        except Exception as e:
+            return f"{rage_response} And I encountered an error: {str(e)}"
     
-    # Search knowledge base
-    results = search_knowledge_base(message)
-    
-    if results:
-        response = results[0]
-        if len(results) > 1:
-            response += f"\n\nAlso: {results[1]}"
-        return response
-    else:
-        # Default response with attitude
-        responses = [
-            "Hmm, not sure what you're asking about. Try asking about Aditi's education, work experience, or projects! 🤔",
-            "I don't have that info right now. Why don't you check the education, experience, or projects sections? 🙃",
-            "Can you be more specific? I know about education, experience, and projects. Pick one! 😏"
-        ]
-        import random
-        return random.choice(responses)
+    # Use RAG pipeline to generate response
+    try:
+        qa_chain = get_rag_chain()
+        result = qa_chain.invoke({"query": message})
+        response_text = result.get("result", "I don't know the answer to that question. Please ask about Aditi's education, experience, or projects.")
+        return response_text
+    except Exception as e:
+        # Fallback response on error
+        return f"I encountered an error while processing your question: {str(e)}. Please try again or ask about Aditi's education, experience, or projects."
 
 # Store conversation history (simple in-memory store)
 conversation_histories = {}

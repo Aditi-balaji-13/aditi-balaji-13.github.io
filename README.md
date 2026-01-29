@@ -1,6 +1,6 @@
 # Aditi Balaji - Portfolio Website
 
-A starry-themed portfolio website with an interactive rage-based chatbot. Fully compatible with GitHub Pages!
+A starry-themed portfolio website with an interactive RAG-powered chatbot using LangChain and Together AI.
 
 ## Features
 
@@ -9,57 +9,124 @@ A starry-themed portfolio website with an interactive rage-based chatbot. Fully 
 - 💼 Work experience timeline
 - 🚀 Projects displayed in a 3-column grid
 - 📧 Contact form with email functionality
-- 💬 Rage-based chatbot (client-side, works on GitHub Pages!)
+- 💬 **RAG-powered chatbot** using LangChain, ChromaDB, and Together AI's Llama 3.3 70B
 
-## Deployment to GitHub Pages
+## Architecture
 
-### Quick Setup:
+This project uses a **two-part architecture**:
 
-1. Push all files to a GitHub repository
-2. Go to repository Settings → Pages
-3. Select the branch (usually `main` or `master`) and `/ (root)` folder
-4. Click Save
-5. Your site will be live at `https://yourusername.github.io/repository-name`
+- **Frontend (GitHub Pages)**: Static HTML/CSS/JS files served on GitHub Pages
+- **Backend (Hosting Service)**: Flask API with LangChain RAG pipeline hosted separately
 
-**Note:** Make sure `index.html` is in the root directory of your repository.
+## Quick Start
 
-### Files Structure:
-```
-repository-root/
-├── index.html
-├── styles.css
-├── script.js
-├── Profile.jpeg
-└── README.md
-```
+### 1. Deploy Backend
+
+The backend needs to be hosted separately. See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed instructions.
+
+**Quick option using Render:**
+1. Sign up at [render.com](https://render.com)
+2. Create new Web Service from this GitHub repo
+3. Set environment variable: `TOGETHER_API=your-api-key`
+4. Deploy (takes ~5-10 minutes)
+
+### 2. Update Frontend
+
+1. Open `script.js`
+2. Update `BACKEND_URL` with your deployed backend URL:
+   ```javascript
+   const BACKEND_URL = 'https://your-backend-url.onrender.com';
+   ```
+
+### 3. Deploy Frontend to GitHub Pages
+
+1. Push to GitHub
+2. Go to Settings → Pages
+3. Select branch and root folder
+4. Your site will be live!
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for complete deployment guide.
 
 ## Local Development
 
-Simply open `index.html` in your web browser, or use a local server:
+### Backend
 
 ```bash
-# Using Python's built-in server
-python -m http.server 8000
+# Install dependencies
+pip install -r requirements.txt
+
+# Set API key
+export TOGETHER_API="your-api-key"
+
+# Run Flask app
+python app.py
 ```
 
-Then navigate to `http://localhost:8000` in your browser.
+Backend will run on `http://localhost:5000`
+
+### Frontend
+
+1. Update `BACKEND_URL` in `script.js` to `http://localhost:5000`
+2. Open `index.html` in browser or use:
+   ```bash
+   python -m http.server 8000
+   ```
 
 ## Files
 
 - `index.html` - Main website HTML
 - `styles.css` - Styling and animations
-- `script.js` - Frontend JavaScript with client-side chatbot (no backend needed!)
-- `Profile.jpeg` - Profile image
+- `script.js` - Frontend JavaScript (connects to Flask backend)
+- `app.py` - Flask backend with LangChain RAG pipeline
+- `requirements.txt` - Python dependencies
+- `Procfile` - For Heroku/Railway deployment
+- `render.yaml` - Render deployment config
+- `DEPLOYMENT.md` - Complete deployment guide
 
-## Chatbot
+## Chatbot Features
 
-The chatbot is **rage-based** and gets progressively more annoyed if you ask repetitive questions! It's fully client-side (no backend required) and contains all the information from the website in its knowledge base. It can answer questions about:
+The chatbot uses a **LangChain RAG pipeline** with:
 
+- **Vector Store**: ChromaDB with HuggingFace embeddings
+- **LLM**: Together AI's Llama 3.3 70B Instruct Turbo
+- **Knowledge Base**: Aditi's education, experience, and projects
+- **Smart Retrieval**: Semantic search to find relevant context
+
+It can answer questions about:
 - Education (Rice University, IIT Madras)
 - Work experience (NASA, Linbeck, ICME Lab, Goldman Sachs, ANEN Group)
 - Projects (all 12 projects)
 - General information about Aditi
 
-**Note:** The `app.py` file is included for reference but is **not needed** for GitHub Pages deployment. The chatbot runs entirely in the browser using JavaScript.
+## Tech Stack
+
+**Frontend:**
+- HTML5, CSS3, JavaScript
+- GitHub Pages (hosting)
+
+**Backend:**
+- Flask (Python web framework)
+- LangChain (RAG framework)
+- ChromaDB (vector database)
+- HuggingFace Embeddings
+- Together AI (LLM provider)
+
+## Environment Variables
+
+- `TOGETHER_API`: Your Together AI API key (required for backend)
+
+## Cost
+
+- **GitHub Pages**: Free
+- **Render Free Tier**: Free (with limitations - spins down after inactivity)
+- **Together AI**: Free tier available for Llama 3.3 70B
+
+## Troubleshooting
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for troubleshooting guide.
+
+## License
+
+This project is open source and available for personal use.
 
 Enjoy the starry experience! 🌟

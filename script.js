@@ -111,7 +111,7 @@ const chatbotMessages = document.getElementById('chatbot-messages');
 // Backend API URL - Update this with your deployed backend URL
 // For local development: 'http://localhost:5000'
 // For production: 'https://your-backend-url.onrender.com' (or your hosting service)
-const BACKEND_URL = 'https://your-backend-url.onrender.com'; // UPDATE THIS!
+const BACKEND_URL = 'https://aditi-balaji-13-github-io.onrender.com'; // UPDATE THIS!
 
 // Knowledge base (client-side)
 const knowledgeBase = {

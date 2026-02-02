@@ -1,9 +1,9 @@
 Flask
 flask-cors
 gunicorn
+requests
 langchain
 langchain-core
-langchain-together
 langchain-community
 chromadb
 sentence-transformers

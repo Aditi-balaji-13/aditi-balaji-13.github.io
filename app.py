@@ -2,15 +2,16 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
 import re
+import requests
+from typing import List, Optional
 
 # LangChain imports
-from langchain_together import ChatTogether
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.chains import RetrievalQA
-from langchain.prompts import PromptTemplate
 from langchain_core.documents import Document
+from langchain_core.language_models.llms import LLM
+from langchain_core.callbacks.manager import CallbackManagerForLLMRun
 
 app = Flask(__name__)
 # Allow CORS from all origins (GitHub Pages can be on any *.github.io subdomain)
@@ -148,7 +149,7 @@ knowledge_base = {
         }
     },
     "general": {
-        "email": "aditi.balaji@rice.edu",
+        "email": "aditi.balaji.ds@gmail.com",
         "linkedin": "www.linkedin.com/in/aditibalaji",
         "github": "https://github.com/Aditi-balaji-13",
         "title": "Data Scientist | AI Researcher | Machine Learning Engineer"
@@ -215,6 +216,48 @@ def knowledge_base_to_documents(kb):
     
     return documents
 
+# Custom LLM wrapper for Together AI API
+class TogetherAILLM(LLM):
+    """Custom LLM that uses Together AI API directly"""
+    model: str = "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free"
+    temperature: float = 0.1
+    max_tokens: int = 1000
+    top_p: float = 0.9
+    api_key: str = ""
+    
+    @property
+    def _llm_type(self) -> str:
+        return "together_ai"
+    
+    def _call(
+        self,
+        prompt: str,
+        stop: Optional[List[str]] = None,
+        run_manager: Optional[CallbackManagerForLLMRun] = None,
+        **kwargs: any,
+    ) -> str:
+        """Call Together AI API"""
+        url = "https://api.together.xyz/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "model": self.model,
+            "messages": [
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "top_p": self.top_p
+        }
+        
+        response = requests.post(url, json=data, headers=headers, timeout=60)
+        response.raise_for_status()
+        result = response.json()
+        
+        return result["choices"][0]["message"]["content"]
+
 # Initialize RAG pipeline
 def initialize_rag_pipeline():
     """Initialize the RAG pipeline with vector store and LLM"""
@@ -237,15 +280,14 @@ def initialize_rag_pipeline():
     )
     splits = text_splitter.split_documents(documents)
     
-    # Create vector store
+    # Create vector store (in-memory for Render)
     vectorstore = Chroma.from_documents(
         documents=splits,
-        embedding=embeddings,
-        persist_directory="./chroma_db"
+        embedding=embeddings
     )
     
-    # Initialize LLM
-    llm = ChatTogether(
+    # Initialize custom LLM
+    llm = TogetherAILLM(
         model="meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
         temperature=0.1,
         max_tokens=1000,
@@ -253,33 +295,18 @@ def initialize_rag_pipeline():
         api_key=together_api_key
     )
     
-    # Create prompt template
-    prompt_template = PromptTemplate(
-        template=system_prompt + "\n\nQuestion: {question}\n\nAssistant:",
-        input_variables=["context", "question"]
-    )
-    
-    # Create retrieval chain
-    qa_chain = RetrievalQA.from_chain_type(
-        llm=llm,
-        chain_type="stuff",
-        retriever=vectorstore.as_retriever(search_kwargs={"k": 3}),
-        chain_type_kwargs={"prompt": prompt_template},
-        return_source_documents=True
-    )
-    
-    return qa_chain, vectorstore
+    return llm, vectorstore
 
 # Initialize RAG pipeline (lazy initialization)
-qa_chain = None
+llm = None
 vectorstore = None
 
-def get_rag_chain():
-    """Get or initialize the RAG chain"""
-    global qa_chain, vectorstore
-    if qa_chain is None:
-        qa_chain, vectorstore = initialize_rag_pipeline()
-    return qa_chain
+def get_rag_components():
+    """Get or initialize the RAG components"""
+    global llm, vectorstore
+    if llm is None:
+        llm, vectorstore = initialize_rag_pipeline()
+    return llm, vectorstore
 
 # Rage responses (for when user is being annoying or asking inappropriate questions)
 rage_responses = [
@@ -312,18 +339,32 @@ def generate_response(message, conversation_history=[]):
         rage_response = random.choice(rage_responses)
         # Still provide the answer but with attitude
         try:
-            qa_chain = get_rag_chain()
-            result = qa_chain.invoke({"query": message})
-            response_text = result.get("result", "I don't know the answer to that.")
+            llm, vectorstore = get_rag_components()
+            # Retrieve relevant documents
+            docs = vectorstore.similarity_search(message, k=3)
+            context = "\n\n".join([doc.page_content for doc in docs])
+            
+            # Format prompt
+            prompt = system_prompt.format(context=context) + f"\n\nQuestion: {message}\n\nAssistant:"
+            
+            # Generate response
+            response_text = llm(prompt)
             return f"{rage_response} But fine, here it is: {response_text}"
         except Exception as e:
             return f"{rage_response} And I encountered an error: {str(e)}"
     
     # Use RAG pipeline to generate response
     try:
-        qa_chain = get_rag_chain()
-        result = qa_chain.invoke({"query": message})
-        response_text = result.get("result", "I don't know the answer to that question. Please ask about Aditi's education, experience, or projects.")
+        llm, vectorstore = get_rag_components()
+        # Retrieve relevant documents
+        docs = vectorstore.similarity_search(message, k=3)
+        context = "\n\n".join([doc.page_content for doc in docs])
+        
+        # Format prompt
+        prompt = system_prompt.format(context=context) + f"\n\nQuestion: {message}\n\nAssistant:"
+        
+        # Generate response
+        response_text = llm(prompt)
         return response_text
     except Exception as e:
         # Fallback response on error

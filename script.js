@@ -88,13 +88,13 @@ document.getElementById('contact-form').addEventListener('submit', function(e) {
     const message = document.getElementById('message').value;
     
     // Create mailto link
-    const mailtoLink = `mailto:aditi.balaji@rice.edu?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(`From: ${name} (${email})\n\n${message}`)}`;
+    const mailtoLink = `mailto:aditi.balaji.ds@gmail.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(`From: ${name} (${email})\n\n${message}`)}`;
     
     // Open email client
     window.location.href = mailtoLink;
     
     // Show success message
-    alert('Your email client should open now. If it doesn\'t, please email aditi.balaji@rice.edu directly.');
+    alert('Your email client should open now. If it doesn\'t, please email aditi.balaji.ds@gmail.com directly.');
     
     // Reset form
     this.reset();
@@ -244,7 +244,7 @@ const knowledgeBase = {
         }
     },
     general: {
-        email: "aditi.balaji@rice.edu",
+        email: "aditi.balaji.ds@gmail.com",
         linkedin: "www.linkedin.com/in/aditibalaji",
         github: "https://github.com/Aditi-balaji-13",
         title: "Data Scientist | AI Researcher | Machine Learning Engineer"

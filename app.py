@@ -4,6 +4,7 @@ import os
 import re
 import requests
 from typing import List, Optional
+import gc  # For garbage collection to free memory
 
 # LangChain imports
 from langchain_community.embeddings import HuggingFaceEmbeddings
@@ -225,6 +226,9 @@ class TogetherAILLM(LLM):
     top_p: float = 0.9
     api_key: str = ""
     
+    class Config:
+        arbitrary_types_allowed = True
+    
     @property
     def _llm_type(self) -> str:
         return "together_ai"
@@ -234,68 +238,82 @@ class TogetherAILLM(LLM):
         prompt: str,
         stop: Optional[List[str]] = None,
         run_manager: Optional[CallbackManagerForLLMRun] = None,
-        **kwargs: any,
+        **kwargs,
     ) -> str:
         """Call Together AI API"""
-        url = "https://api.together.xyz/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        data = {
-            "model": self.model,
-            "messages": [
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": self.temperature,
-            "max_tokens": self.max_tokens,
-            "top_p": self.top_p
-        }
-        
-        response = requests.post(url, json=data, headers=headers, timeout=60)
-        response.raise_for_status()
-        result = response.json()
-        
-        return result["choices"][0]["message"]["content"]
+        try:
+            url = "https://api.together.xyz/v1/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            }
+            data = {
+                "model": self.model,
+                "messages": [
+                    {"role": "user", "content": prompt}
+                ],
+                "temperature": self.temperature,
+                "max_tokens": self.max_tokens,
+                "top_p": self.top_p
+            }
+            
+            response = requests.post(url, json=data, headers=headers, timeout=60)
+            response.raise_for_status()
+            result = response.json()
+            
+            return result["choices"][0]["message"]["content"]
+        except Exception as e:
+            return f"Error calling Together AI API: {str(e)}"
 
 # Initialize RAG pipeline
 def initialize_rag_pipeline():
     """Initialize the RAG pipeline with vector store and LLM"""
-    # Get API key from environment variable (or use st.secrets if available)
-    # For Flask, we'll use environment variable
-    together_api_key = os.environ.get("TOGETHER_API", "")
-    
-    # Initialize embeddings
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
-    )
-    
-    # Convert knowledge_base to documents
-    documents = knowledge_base_to_documents(knowledge_base)
-    
-    # Split documents into chunks
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=200
-    )
-    splits = text_splitter.split_documents(documents)
-    
-    # Create vector store (in-memory for Render)
-    vectorstore = Chroma.from_documents(
-        documents=splits,
-        embedding=embeddings
-    )
-    
-    # Initialize custom LLM
-    llm = TogetherAILLM(
-        model="meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
-        temperature=0.1,
-        max_tokens=1000,
-        top_p=0.9,
-        api_key=together_api_key
-    )
-    
-    return llm, vectorstore
+    try:
+        # Get API key from environment variable
+        together_api_key = os.environ.get("TOGETHER_API", "")
+        if not together_api_key:
+            raise ValueError("TOGETHER_API environment variable is not set")
+        
+        # Initialize embeddings - use smaller model to save memory
+        # Using a smaller model that requires less memory
+        embeddings = HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-MiniLM-L6-v2",
+            model_kwargs={'device': 'cpu'},
+            encode_kwargs={'normalize_embeddings': True}
+        )
+        
+        # Convert knowledge_base to documents
+        documents = knowledge_base_to_documents(knowledge_base)
+        
+        # Split documents into chunks (smaller chunks to reduce memory)
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=500,  # Reduced from 1000
+            chunk_overlap=100  # Reduced from 200
+        )
+        splits = text_splitter.split_documents(documents)
+        
+        # Create vector store (in-memory for Render)
+        vectorstore = Chroma.from_documents(
+            documents=splits,
+            embedding=embeddings
+        )
+        
+        # Force garbage collection after creating vector store
+        gc.collect()
+        
+        # Initialize custom LLM
+        llm = TogetherAILLM(
+            model="meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
+            temperature=0.1,
+            max_tokens=1000,
+            top_p=0.9,
+            api_key=together_api_key
+        )
+        
+        return llm, vectorstore
+    except Exception as e:
+        print(f"Error initializing RAG pipeline: {str(e)}")
+        raise
 
 # Initialize RAG pipeline (lazy initialization)
 llm = None
@@ -375,29 +393,54 @@ conversation_histories = {}
 
 @app.route('/chat', methods=['POST'])
 def chat():
-    data = request.json
-    message = data.get('message', '')
-    session_id = data.get('session_id', 'default')
-    
-    # Get conversation history for this session
-    if session_id not in conversation_histories:
-        conversation_histories[session_id] = []
-    
-    history = conversation_histories[session_id]
-    history.append(message)
-    
-    # Generate response
-    response = generate_response(message, history)
-    
-    # Keep history manageable
-    if len(history) > 10:
-        conversation_histories[session_id] = history[-10:]
-    
-    return jsonify({'response': response})
+    try:
+        if not request.json:
+            return jsonify({'error': 'No JSON data provided'}), 400
+        
+        data = request.json
+        message = data.get('message', '')
+        session_id = data.get('session_id', 'default')
+        
+        if not message:
+            return jsonify({'error': 'Message is required'}), 400
+        
+        # Get conversation history for this session
+        if session_id not in conversation_histories:
+            conversation_histories[session_id] = []
+        
+        history = conversation_histories[session_id]
+        history.append(message)
+        
+        # Generate response
+        response = generate_response(message, history)
+        
+        # Keep history manageable
+        if len(history) > 10:
+            conversation_histories[session_id] = history[-10:]
+        
+        return jsonify({'response': response})
+    except Exception as e:
+        return jsonify({
+            'error': 'Internal server error',
+            'message': str(e)
+        }), 500
 
 @app.route('/health', methods=['GET'])
 def health():
-    return jsonify({'status': 'healthy'})
+    """Health check endpoint - works even if RAG isn't initialized"""
+    try:
+        api_key_set = bool(os.environ.get("TOGETHER_API", ""))
+        rag_initialized = llm is not None
+        return jsonify({
+            'status': 'healthy',
+            'api_key_set': api_key_set,
+            'rag_initialized': rag_initialized
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': str(e)
+        }), 500
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

@@ -48,7 +48,7 @@ def call_together_ai(prompt, api_key):
         "Content-Type": "application/json"
     }
     data = {
-        "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
+        "model": "ServiceNow-AI/Apriel-1.6-15b-Thinker",
         "messages": [
             {"role": "user", "content": prompt}
         ],

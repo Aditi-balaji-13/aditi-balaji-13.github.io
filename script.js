@@ -538,7 +538,15 @@ async function sendMessage() {
         if (data.error) {
             addMessage(`Error: ${data.error}`, false);
         } else {
-            addMessage(data.response || "I'm sorry, I couldn't generate a response.", false);
+            // Extract response content (similar to response.choices[0].message.content format)
+            // Backend returns simplified format: {response: "..."}
+            // But also handle full Together AI format if needed: {choices: [{message: {content: "..."}}]}
+            const responseContent = data.response || data.choices?.[0]?.message?.content || "I'm sorry, I couldn't generate a response.";
+            
+            // Print response in console (similar to print(response.choices[0].message.content))
+            console.log("Chat Response:", responseContent);
+            
+            addMessage(responseContent, false);
         }
         
     } catch (error) {

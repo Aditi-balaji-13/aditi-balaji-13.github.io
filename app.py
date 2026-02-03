@@ -320,10 +320,14 @@ llm = None
 vectorstore = None
 
 def get_rag_components():
-    """Get or initialize the RAG components"""
+    """Get or initialize the RAG components (lazy loading to save memory)"""
     global llm, vectorstore
-    if llm is None:
-        llm, vectorstore = initialize_rag_pipeline()
+    if llm is None or vectorstore is None:
+        try:
+            llm, vectorstore = initialize_rag_pipeline()
+        except Exception as e:
+            print(f"Failed to initialize RAG: {str(e)}")
+            raise
     return llm, vectorstore
 
 # Rage responses (for when user is being annoying or asking inappropriate questions)
@@ -430,7 +434,11 @@ def health():
     """Health check endpoint - works even if RAG isn't initialized"""
     try:
         api_key_set = bool(os.environ.get("TOGETHER_API", ""))
-        rag_initialized = llm is not None
+        # Check if RAG is initialized without accessing it (to avoid errors)
+        try:
+            rag_initialized = llm is not None and vectorstore is not None
+        except:
+            rag_initialized = False
         return jsonify({
             'status': 'healthy',
             'api_key_set': api_key_set,

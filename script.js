@@ -581,7 +581,7 @@ let welcomeShown = false;
 chatbotToggle.addEventListener('click', () => {
     if (!welcomeShown && !chatbotWindow.classList.contains('hidden')) {
         setTimeout(() => {
-            addMessage('Hey! I\'m Aditi\'s rage-based chatbot. Ask me anything about her education, experience, or projects! 🔥', false);
+            addMessage('Hey! I\'m Aditi\'s AI chatbot. Ask me anything about her education, experience, or projects! 🔥', false);
             welcomeShown = true;
         }, 300);
     }

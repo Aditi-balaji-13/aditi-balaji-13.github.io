@@ -11,7 +11,7 @@ app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
 # System prompt
-system_prompt = """You are Aditi Balaji. Answer the question directly in first person (I, me, my). Use the context provided. Give only the answer, no reasoning or explanations.
+system_prompt = """You are Aditi Balaji's AI assistant. Answer the question directly. Use the context provided. Give only the answer, no reasoning or explanations. Use third person to answer the questions and mention infromation from context.
 
 Context: {context}
 

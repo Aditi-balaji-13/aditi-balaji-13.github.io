@@ -29,3 +29,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Old app files (keep for reference)
+app_old.py

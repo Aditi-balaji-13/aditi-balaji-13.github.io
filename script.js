@@ -62,7 +62,10 @@ style.textContent = `
 document.head.appendChild(style);
 
 // Initialize stars on page load
-document.addEventListener('DOMContentLoaded', createStars);
+document.addEventListener('DOMContentLoaded', () => {
+    createStars();
+    loadEmbeddings(); // Load embeddings when page loads
+});
 
 // Smooth scrolling for navigation links
 document.querySelectorAll('a[href^="#"]').forEach(anchor => {
@@ -112,6 +115,111 @@ const chatbotMessages = document.getElementById('chatbot-messages');
 // For local development: 'http://localhost:5000'
 // For production: 'https://your-backend-url.onrender.com' (or your hosting service)
 const BACKEND_URL = 'https://aditi-balaji-13-github-io.onrender.com'; // UPDATE THIS!
+
+// Embeddings data (loaded from embeddings.json)
+let embeddingsData = null;
+
+// Load embeddings on page load
+async function loadEmbeddings() {
+    try {
+        const response = await fetch('embeddings.json');
+        if (!response.ok) {
+            throw new Error('Failed to load embeddings.json');
+        }
+        embeddingsData = await response.json();
+        console.log(`Loaded ${embeddingsData.embeddings.length} embeddings`);
+    } catch (error) {
+        console.error('Error loading embeddings:', error);
+        // Fallback: embeddings will be null, backend will handle it
+    }
+}
+
+// Cosine similarity function
+function cosineSimilarity(vecA, vecB) {
+    if (vecA.length !== vecB.length) return 0;
+    
+    let dotProduct = 0;
+    let normA = 0;
+    let normB = 0;
+    
+    for (let i = 0; i < vecA.length; i++) {
+        dotProduct += vecA[i] * vecB[i];
+        normA += vecA[i] * vecA[i];
+        normB += vecB[i] * vecB[i];
+    }
+    
+    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+// Embed query text using a hash-based approach
+// Note: This is a simplified embedding. For production, consider:
+// - Using TensorFlow.js with the same model
+// - Adding a lightweight embedding endpoint on backend
+// - Using a service like OpenAI's embedding API
+function embedText(text) {
+    if (!embeddingsData) {
+        // Fallback: return zero vector
+        return new Array(384).fill(0);
+    }
+    
+    const dimension = embeddingsData.dimension || 384;
+    const vector = new Array(dimension).fill(0);
+    
+    // Tokenize text (simple word splitting)
+    const words = text.toLowerCase()
+        .replace(/[^\w\s]/g, ' ')
+        .split(/\s+/)
+        .filter(w => w.length > 2); // Filter very short words
+    
+    if (words.length === 0) {
+        return vector;
+    }
+    
+    // Create embedding using multiple hash functions (simulating dense embeddings)
+    words.forEach(word => {
+        // Use multiple hash functions to distribute word across vector
+        for (let seed = 0; seed < 5; seed++) {
+            let hash = seed;
+            for (let i = 0; i < word.length; i++) {
+                hash = ((hash << 5) - hash) + word.charCodeAt(i);
+                hash = hash & hash; // Convert to 32-bit integer
+            }
+            const pos = Math.abs(hash) % dimension;
+            // Add weighted value (TF-like weighting)
+            vector[pos] += (1.0 / words.length) * (1.0 / (seed + 1));
+        }
+    });
+    
+    // Normalize the vector (L2 normalization like sentence-transformers)
+    const norm = Math.sqrt(vector.reduce((sum, val) => sum + val * val, 0));
+    if (norm > 0) {
+        return vector.map(val => val / norm);
+    }
+    return vector;
+}
+
+// Find most relevant documents using similarity search
+function findRelevantDocuments(query, topK = 3) {
+    if (!embeddingsData || !embeddingsData.embeddings || embeddingsData.embeddings.length === 0) {
+        console.warn('Embeddings not loaded, returning empty results');
+        return [];
+    }
+    
+    // Embed the query
+    const queryEmbedding = embedText(query);
+    
+    // Calculate similarities
+    const similarities = embeddingsData.embeddings.map((docEmbedding, idx) => ({
+        index: idx,
+        similarity: cosineSimilarity(queryEmbedding, docEmbedding),
+        text: embeddingsData.documents[idx].text
+    }));
+    
+    // Sort by similarity and get top K
+    similarities.sort((a, b) => b.similarity - a.similarity);
+    
+    return similarities.slice(0, topK).map(item => item.text);
+}
 
 // Knowledge base (client-side)
 const knowledgeBase = {
@@ -403,7 +511,10 @@ async function sendMessage() {
     const loadingMessage = addMessage("Thinking...", false);
     
     try {
-        // Call Flask backend API
+        // Step 1: Find relevant documents using similarity search
+        const relevantDocs = findRelevantDocuments(message, 3);
+        
+        // Step 2: Send question + context to backend
         const response = await fetch(`${BACKEND_URL}/chat`, {
             method: 'POST',
             headers: {
@@ -411,24 +522,38 @@ async function sendMessage() {
             },
             body: JSON.stringify({
                 message: message,
-                session_id: 'github-pages-session'
+                context: relevantDocs  // Send relevant context documents
             })
         });
         
         if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || `Server error (${response.status})`);
         }
         
         const data = await response.json();
         
         // Remove loading message and add actual response
         loadingMessage.remove();
-        addMessage(data.response || "I'm sorry, I couldn't generate a response.", false);
+        if (data.error) {
+            addMessage(`Error: ${data.error}`, false);
+        } else {
+            addMessage(data.response || "I'm sorry, I couldn't generate a response.", false);
+        }
         
     } catch (error) {
         console.error('Error calling backend:', error);
         loadingMessage.remove();
-        addMessage("Sorry, I'm having trouble connecting to the server. Please try again later.", false);
+        
+        // More specific error messages
+        let errorMsg = "Sorry, I'm having trouble connecting to the server.";
+        if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+            errorMsg = "Cannot connect to server. The backend might be starting up (free tier takes ~30 seconds) or might be down. Please try again in a moment.";
+        } else if (error.message) {
+            errorMsg = `Error: ${error.message}`;
+        }
+        
+        addMessage(errorMsg, false);
     } finally {
         chatbotSend.disabled = false;
         chatbotInput.disabled = false;

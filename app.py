@@ -57,11 +57,43 @@ def call_together_ai(prompt, api_key):
         "top_p": 0.9
     }
     
-    response = requests.post(url, json=data, headers=headers, timeout=60)
-    response.raise_for_status()
-    result = response.json()
-    
-    return result["choices"][0]["message"]["content"]
+    try:
+        response = requests.post(url, json=data, headers=headers, timeout=60)
+        
+        # Log response for debugging
+        print(f"Together AI API Status: {response.status_code}")
+        
+        if response.status_code != 200:
+            error_detail = response.text
+            try:
+                error_detail = response.json()
+            except:
+                pass
+            print(f"Together AI API Error: {error_detail}")
+            raise Exception(f"Together AI API returned {response.status_code}: {error_detail}")
+        
+        result = response.json()
+        
+        # Check response structure
+        if "choices" not in result:
+            print(f"Unexpected response structure: {result}")
+            raise Exception(f"Unexpected response structure: no 'choices' field")
+        
+        if len(result["choices"]) == 0:
+            print(f"Empty choices array: {result}")
+            raise Exception("Together AI returned empty choices array")
+        
+        if "message" not in result["choices"][0]:
+            print(f"Unexpected choice structure: {result['choices'][0]}")
+            raise Exception("Unexpected choice structure: no 'message' field")
+        
+        return result["choices"][0]["message"]["content"]
+    except requests.exceptions.Timeout:
+        raise Exception("Together AI API request timed out")
+    except requests.exceptions.ConnectionError:
+        raise Exception("Failed to connect to Together AI API")
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"Together AI API request failed: {str(e)}")
 
 @app.route('/chat', methods=['POST'])
 def chat():
@@ -89,7 +121,11 @@ def chat():
         # Get API key
         together_api_key = os.environ.get("TOGETHER_API", "")
         if not together_api_key:
+            print("ERROR: TOGETHER_API environment variable is not set!")
             return jsonify({'error': 'TOGETHER_API not configured'}), 500
+        
+        # Log that API key is set (but don't log the actual key)
+        print(f"API key is set (length: {len(together_api_key)})")
         
         # Call Together AI
         try:

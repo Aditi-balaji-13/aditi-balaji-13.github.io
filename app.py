@@ -83,8 +83,8 @@ def chat():
         else:
             context = "No relevant context found."
         
-        # Format prompt
-        prompt = system_prompt.format(context=context) + f"\n\nQuestion: {message}\n\nAssistant:"
+        # Format prompt (use replace instead of format to avoid issues with curly braces)
+        prompt = system_prompt.replace('{context}', context) + f"\n\nQuestion: {message}\n\nAssistant:"
         
         # Get API key
         together_api_key = os.environ.get("TOGETHER_API", "")
@@ -92,13 +92,28 @@ def chat():
             return jsonify({'error': 'TOGETHER_API not configured'}), 500
         
         # Call Together AI
-        response_text = call_together_ai(prompt, together_api_key)
+        try:
+            response_text = call_together_ai(prompt, together_api_key)
+        except requests.exceptions.RequestException as e:
+            return jsonify({
+                'error': 'Failed to call Together AI API',
+                'message': str(e)
+            }), 500
+        except (KeyError, IndexError) as e:
+            return jsonify({
+                'error': 'Unexpected response from Together AI',
+                'message': str(e)
+            }), 500
         
         return jsonify({'response': response_text})
     except Exception as e:
+        import traceback
+        error_msg = str(e)
+        traceback_str = traceback.format_exc()
+        print(f"Error in /chat: {error_msg}\n{traceback_str}")  # Log to console
         return jsonify({
             'error': 'Internal server error',
-            'message': str(e)
+            'message': error_msg
         }), 500
 
 @app.route('/health', methods=['GET'])

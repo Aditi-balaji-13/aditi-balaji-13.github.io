@@ -11,37 +11,13 @@ app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
 # System prompt
-system_prompt = """You are Aditi Balaji. Answer questions about yourself using first person (I, me, my). 
-    Use the following pieces of retrieved context to answer the question. 
-    If you don't know the answer, just say that you don't know. 
-    The context is extracted from your resume, experiences, and creative work. 
-    Answer questions in the following pattern:
+system_prompt = """You are Aditi Balaji. Answer the question directly in first person (I, me, my). Use the context provided. Give only the answer, no reasoning or explanations.
 
-    User: Who is Aditi Balaji?
+Context: {context}
 
-    Assistant: I am a recent graduate with a master's degree in Data Science from Rice University. 
-    I completed my Bachelor's of Technology with a minor in Artificial Intelligence and Machine Learning from IIT Madras. 
-    I have experiences and projects in the fields of LLMs, Computer Vision, Quantitative finance and more.
+Question: {question}
 
-    User: Who are you?
-
-    Assistant: I am Aditi Balaji, a Data Scientist and AI Researcher with a master's degree in Data Science from Rice University.
-
-    User: Where did Aditi study?
-
-    Assistant: I studied at IIT Madras for my Bachelor's degree and at Rice University for my Master's degree in Data Science.
-
-    User: What tools do you use in machine learning?
-
-    Assistant: My machine learning toolkit includes a strong foundation in programming languages such as Python, SQL, R, Java, C, and MATLAB. My core ML frameworks include PyTorch, TensorFlow, Scikit-learn. I also use CatBoost and XGBoost for gradient boosting tasks, and HuggingFace Transformers for working with large language models. 
-    For graph-based and retrieval-augmented learning, I employ Langchain, FAISS, ChromaDB, and I leverage Apache PySpark and Hadoop to scale machine learning workflows on large datasets. I also have experience with AWS, dockers, etc. for deployment.
-
-    User: What are your top experiences?
-
-    Assistant: I have worked on several impactful data science projects spanning computer vision, natural language processing, financial modeling, and graph learning. At NASA, I developed a lightweight spacecraft image segmentation system using deep learning models optimized for low-resource environments, while at Linbeck Group, I built a retrieval-augmented generation (RAG) chatbot to process large volumes of unstructured data. My work at Goldman Sachs focused on financial modeling, where I improved marketing recommendation systems using advanced techniques for imbalanced data, and my research at IIT Madras involved applying spatio-temporal Graph Neural Networks to enhance the performance of grain growth simulations.
-
-    Use the following context and answer precisely the question asked by the user. Always respond in first person as Aditi Balaji.
-    Context: {context}:"""
+Answer:"""
 
 def call_together_ai(prompt, api_key):
     """Call Together AI API"""
@@ -56,8 +32,9 @@ def call_together_ai(prompt, api_key):
             {"role": "user", "content": prompt}
         ],
         "temperature": 0.1,
-        "max_tokens": 1000,
-        "top_p": 0.9
+        "max_tokens": 300,  # Reduced to prevent verbose reasoning
+        "top_p": 0.9,
+        "stop": ["\n\nThe user", "\n\nUser:", "\n\nQuestion:", "\n\nContext:", "\n\nAnswer:", "The user asks", "The context", "The pattern"]
     }
     
     try:
@@ -90,7 +67,39 @@ def call_together_ai(prompt, api_key):
             print(f"Unexpected choice structure: {result['choices'][0]}")
             raise Exception("Unexpected choice structure: no 'message' field")
         
-        return result["choices"][0]["message"]["content"]
+        response_text = result["choices"][0]["message"]["content"]
+        
+        # Post-process to remove reasoning from "Thinker" models
+        # Extract only the direct answer (before any reasoning starts)
+        lines = response_text.split('\n')
+        direct_answer = []
+        reasoning_keywords = ["The user", "The context", "The pattern", "The question", "The answer", "We need", "Thus", "So", "However", "The examples"]
+        
+        for line in lines:
+            line_stripped = line.strip()
+            # Stop if we hit reasoning keywords
+            if any(line_stripped.startswith(keyword) for keyword in reasoning_keywords):
+                break
+            # Skip empty lines at start
+            if not direct_answer and not line_stripped:
+                continue
+            # Add non-reasoning lines
+            if line_stripped and not any(line_stripped.startswith(keyword) for keyword in reasoning_keywords):
+                direct_answer.append(line)
+            # Stop if we see reasoning patterns
+            if "The user asks" in line or "The context:" in line or "The pattern:" in line:
+                break
+        
+        # If we found a direct answer, use it; otherwise use original
+        if direct_answer:
+            cleaned_response = '\n'.join(direct_answer).strip()
+            # Remove any trailing reasoning markers
+            for marker in ["Answer:", "Answer directly:", "Thus answer:", "Final answer:"]:
+                if cleaned_response.startswith(marker):
+                    cleaned_response = cleaned_response[len(marker):].strip()
+            return cleaned_response
+        
+        return response_text
     except requests.exceptions.Timeout:
         raise Exception("Together AI API request timed out")
     except requests.exceptions.ConnectionError:
@@ -119,7 +128,7 @@ def chat():
             context = "No relevant context found."
         
         # Format prompt (use replace instead of format to avoid issues with curly braces)
-        prompt = system_prompt.replace('{context}', context) + f"\n\nQuestion: {message}\n\nAssistant:"
+        prompt = system_prompt.replace('{context}', context).replace('{question}', message)
         
         # Get API key
         together_api_key = os.environ.get("TOGETHER_API", "")

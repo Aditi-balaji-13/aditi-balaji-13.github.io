@@ -27,14 +27,13 @@ def call_together_ai(prompt, api_key):
         "Content-Type": "application/json"
     }
     data = {
-        "model": "ServiceNow-AI/Apriel-1.6-15b-Thinker",
+        "model": "google/gemma-3n-E4B-it",
         "messages": [
             {"role": "user", "content": prompt}
         ],
         "temperature": 0.1,
-        "max_tokens": 300,  # Reduced to prevent verbose reasoning
-        "top_p": 0.9,
-        "stop": ["\n\nThe user", "\n\nUser:", "\n\nQuestion:", "\n\nContext:", "\n\nAnswer:", "The user asks", "The context", "The pattern"]
+        "max_tokens": 500,
+        "top_p": 0.9
     }
     
     try:

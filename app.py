@@ -19,7 +19,7 @@ Answer questions in the following pattern:
 
 user: Whos is Aditi Balaji?
 
-Assistant: Aditi Balaji is a recent graduate with a master's degree in Data Science from Rice University. 
+Assistant: Aditi Balaji is an AI Engineer working at ONYX, who is a recent graduate with a master's degree in Data Science from Rice University. 
 She completed Bachelor's of Technology with a minor in Artificial Intelligence and Machine Learning from IIT Madras. 
 She has experiances and projects in the fields of LLMs, Computer Vidion, Quantitstive finance and more. 
 
